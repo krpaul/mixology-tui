@@ -1,4 +1,4 @@
-# scdown
+# mixology-tui
 
 Terminal UI for downloading DJ audio from SoundCloud. Supports Spotify playlist import, direct SoundCloud URLs, and 1001tracklists set pages.
 
@@ -25,7 +25,7 @@ Each launch pulls the latest changes from the repository (if this folder is a gi
 If you cloned via SSH and do not have keys set up on this machine, switch the remote to HTTPS first:
 
 ```
-git remote set-url origin https://github.com/your-username/scdown.git
+git remote set-url origin https://github.com/your-username/mixology-tui.git
 ```
 
 ### Windows — double-click `launch-windows.bat`
@@ -35,8 +35,8 @@ Double-click `launch-windows.bat`. A Command Prompt window opens, pulls updates,
 ### Manual
 
 ```
-python3 scdown.py          # macOS / Linux
-python  scdown.py          # Windows
+python3 mixology-tui.py          # macOS / Linux
+python  mixology-tui.py          # Windows
 ```
 
 Navigate tabs with **F1–F6** or by clicking the tab bar. Quit with **Ctrl+Q**.
@@ -155,7 +155,7 @@ Downloads run sequentially. Status and progress update in place. The footer show
 
 **Output directory** — where downloaded files are saved. Defaults to `~/Music/DJ`.
 
-**Spotify API** — create an app at developer.spotify.com, add `http://127.0.0.1:8888/callback` as a redirect URI, paste the Client ID and Secret here, then click **Login with Spotify**. A browser window opens for OAuth. The token is cached at `~/.config/scdown/.spotify_cache` and reused across sessions.
+**Spotify API** — create an app at developer.spotify.com, add `http://127.0.0.1:8888/callback` as a redirect URI, paste the Client ID and Secret here, then click **Login with Spotify**. A browser window opens for OAuth. The token is cached at `~/.config/mixology-tui/.spotify_cache` and reused across sessions.
 
 **SoundCloud Go+ token** — optional. Unlocks 256 kbps AAC downloads instead of the default 160 kbps. Find it in browser DevTools under any SoundCloud network request's Authorization header value (starts with `OAuth`).
 

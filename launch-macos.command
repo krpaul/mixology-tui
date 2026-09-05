@@ -13,5 +13,5 @@ echo "--- Installing dependencies ---"
 python3 -m pip install -r requirements.txt -q
 
 echo ""
-echo "--- Starting scdown ---"
-python3 scdown.py
+echo "--- Starting mixology-tui ---"
+python3 mixology-tui.py

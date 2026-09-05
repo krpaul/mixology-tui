@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-scdown — DJ audio downloader TUI
+mixology-tui — DJ audio downloader TUI
 
 Install:
-  python -m pip install yt-dlp textual spotipy
+  python -m pip install yt-dlp textual spotipy beautifulsoup4 lxml
 
 Run:
-  python scdown.py
+  python mixology-tui.py
 """
 
 import json
@@ -38,7 +38,7 @@ from textual.widgets.selection_list import Selection
 
 # ─── Config ─────────────────────────────────────────────────────────────────
 
-CONFIG_FILE = Path.home() / ".config" / "scdown" / "config.json"
+CONFIG_FILE = Path.home() / ".config" / "mixology-tui" / "config.json"
 SOUNDCLOUD_RE = re.compile(r"https?://(www\.)?soundcloud\.com/", re.IGNORECASE)
 # Handle plain, locale-prefixed, and URI forms:
 #   https://open.spotify.com/playlist/ID
@@ -890,8 +890,8 @@ SettingsPane Input {
 """
 
 
-class ScdownApp(App):
-    TITLE = "scdown"
+class MixologyApp(App):
+    TITLE = "mixology-tui"
     SUB_TITLE = "DJ audio downloader"
     CSS = APP_CSS
 
@@ -1003,4 +1003,4 @@ class ScdownApp(App):
 
 
 if __name__ == "__main__":
-    ScdownApp().run()
+    MixologyApp().run()

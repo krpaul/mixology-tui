@@ -16,6 +16,10 @@ env/
 *.aac
 *.ogg
 
+# Spotify token cache (spotipy writes this to the working directory)
+.cache
+.cache-*
+
 # macOS
 .DS_Store
 

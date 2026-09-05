@@ -14,11 +14,11 @@ echo --- Installing dependencies ---
 python -m pip install -r requirements.txt -q
 
 echo.
-echo --- Starting scdown ---
-python scdown.py
+echo --- Starting mixology-tui ---
+python mixology-tui.py
 
 if %errorlevel% neq 0 (
     echo.
-    echo scdown exited with an error. See above for details.
+    echo mixology-tui exited with an error. See above for details.
     pause
 )
