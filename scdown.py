@@ -24,6 +24,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Footer,
     Header,
@@ -93,6 +94,7 @@ class Job:
     progress: str = ""
     error: str = ""
     subfolder: str = ""
+    filename_prefix: str = ""  # e.g. "01 - " for set-order enumeration
 
 
 # ─── Audio engine ────────────────────────────────────────────────────────────
@@ -128,7 +130,7 @@ def sc_resolve_url(query: str, cfg: dict) -> Optional[str]:
     return None
 
 
-def sc_download(url: str, cfg: dict, out_dir: Path, on_progress) -> None:
+def sc_download(url: str, cfg: dict, out_dir: Path, on_progress, prefix: str = "") -> None:
     def _hook(d: dict) -> None:
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
@@ -141,7 +143,7 @@ def sc_download(url: str, cfg: dict, out_dir: Path, on_progress) -> None:
             on_progress("Saving…")
 
     opts = _ydl_base(cfg) | {
-        "outtmpl": str(out_dir / "%(uploader)s - %(title)s.%(ext)s"),
+        "outtmpl": str(out_dir / f"{prefix}%(uploader)s - %(title)s.%(ext)s"),
         "progress_hooks": [_hook],
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -672,6 +674,7 @@ class TracklistPane(Vertical):
         with Horizontal(id="tl-folder-row"):
             yield Label("Download folder: ", id="tl-folder-label")
             yield Input(placeholder="e.g. seven-lions-edc-2026", id="tl-folder")
+        yield Checkbox("Number tracks in set order (01 - …, 02 - …)", id="tl-enumerate")
         yield Button("Download Selected", id="tl-go", variant="success", disabled=True)
 
     @on(Button.Pressed, "#tl-browse")
@@ -751,11 +754,14 @@ class TracklistPane(Vertical):
             self.query_one("#tl-status", Label).update("[yellow]Nothing selected.[/yellow]")
             return
         subfolder = self.query_one("#tl-folder", Input).value.strip()
+        enumerate_tracks = self.query_one("#tl-enumerate", Checkbox).value
+        width = len(str(len(self._tracks)))  # 2 for ≤99 tracks, 3 for ≤999
         jobs = [
             Job(
                 display=self._tracks[i]["display"],
                 query=self._tracks[i]["title"],  # already "Artist - Track Name"
                 subfolder=subfolder,
+                filename_prefix=f"{i + 1:0{width}d} - " if enumerate_tracks else "",
             )
             for i in selected_indices
             if i < len(self._tracks)
@@ -861,6 +867,10 @@ SettingsPane {
 }
 #tl-folder-row Input {
     width: 1fr;
+}
+#tl-enumerate {
+    height: 3;
+    margin-bottom: 1;
 }
 #tl-go {
     width: 100%;
@@ -977,7 +987,7 @@ class ScdownApp(App):
                 self.call_from_thread(self._ui_update, _job)
 
             try:
-                sc_download(job.query, cfg, dest, _prog)
+                sc_download(job.query, cfg, dest, _prog, job.filename_prefix)
                 job.status = "done"
                 job.progress = ""
             except Exception as exc:
