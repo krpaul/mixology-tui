@@ -1,0 +1,5 @@
+yt-dlp
+textual
+spotipy
+beautifulsoup4
+lxml
