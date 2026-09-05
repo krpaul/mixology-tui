@@ -10,12 +10,33 @@ Run:
 """
 
 import json
+import logging
 import re
+import shutil
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+FFMPEG_AVAILABLE = bool(shutil.which("ffmpeg"))
+
+logger = logging.getLogger("mixology")
+
+
+def setup_logging() -> None:
+    log_path = Path.home() / ".config" / "mixology-tui" / "debug.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.FileHandler(log_path, encoding="utf-8")],
+    )
+    logger.info("=" * 60)
+    logger.info("mixology-tui session start")
+    logger.info("log: %s", log_path)
 
 import yt_dlp
 from textual import on, work
@@ -40,6 +61,7 @@ from textual.widgets.selection_list import Selection
 
 CONFIG_FILE = Path.home() / ".config" / "mixology-tui" / "config.json"
 SOUNDCLOUD_RE = re.compile(r"https?://(www\.)?soundcloud\.com/", re.IGNORECASE)
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # Handle plain, locale-prefixed, and URI forms:
 #   https://open.spotify.com/playlist/ID
 #   https://open.spotify.com/intl-en/playlist/ID
@@ -95,6 +117,7 @@ class Job:
     error: str = ""
     subfolder: str = ""
     filename_prefix: str = ""  # e.g. "01 - " for set-order enumeration
+    original_query: str = ""   # preserved search string for DRM fallback
 
 
 # ─── Audio engine ────────────────────────────────────────────────────────────
@@ -107,7 +130,7 @@ def _ydl_base(cfg: dict) -> dict:
         "format": "bestaudio[format_id*=original]/bestaudio/best",
         "extractor_args": {"soundcloud": {"formats": ["http_aac", "hls_aac"]}},
         # Overwrite whatever tags the uploader embedded with correct SoundCloud metadata
-        "postprocessors": [{"key": "FFmpegMetadata", "add_metadata": True}],
+        "postprocessors": [{"key": "FFmpegMetadata", "add_metadata": True}] if FFMPEG_AVAILABLE else [],
     }
     if cfg.get("sc_token"):
         opts["http_headers"] = {"Authorization": f"OAuth {cfg['sc_token']}"}
@@ -115,10 +138,13 @@ def _ydl_base(cfg: dict) -> dict:
 
 
 def sc_search(query: str, cfg: dict, n: int = 8) -> list[dict]:
+    logger.debug("sc_search query=%r n=%d", query, n)
     opts = _ydl_base(cfg) | {"extract_flat": "in_playlist"}
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(f"scsearch{n}:{query}", download=False)
-    return (info or {}).get("entries") or []
+    results = (info or {}).get("entries") or []
+    logger.debug("sc_search got %d results", len(results))
+    return results
 
 
 def sc_resolve_url(query: str, cfg: dict) -> Optional[str]:
@@ -126,11 +152,15 @@ def sc_resolve_url(query: str, cfg: dict) -> Optional[str]:
         return query
     results = sc_search(query, cfg, n=1)
     if results:
-        return results[0].get("webpage_url") or results[0].get("url")
+        url = results[0].get("webpage_url") or results[0].get("url")
+        logger.debug("sc_resolve_url %r -> %s", query, url)
+        return url
+    logger.warning("sc_resolve_url no result for %r", query)
     return None
 
 
 def sc_download(url: str, cfg: dict, out_dir: Path, on_progress, prefix: str = "") -> None:
+    logger.debug("sc_download url=%s dest=%s prefix=%r", url, out_dir, prefix)
     def _hook(d: dict) -> None:
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
@@ -258,17 +288,28 @@ def fetch_spotify_playlist(playlist_id: str, cfg: dict) -> tuple[str, list[Track
 
 def pick_html_file() -> Optional[str]:
     """Open the native OS file picker. Must be called from a background thread."""
-    import tkinter as tk
-    from tkinter import filedialog
-    root = tk.Tk()
-    root.withdraw()
-    root.wm_attributes("-topmost", True)
-    path = filedialog.askopenfilename(
-        title="Select saved 1001tracklists HTML",
-        filetypes=[("HTML files", "*.htm *.html"), ("All files", "*.*")],
-    )
-    root.destroy()
-    return path or None
+    import sys
+    if sys.platform == "darwin":
+        # Tk cannot be initialised from a non-main thread on macOS — use osascript instead
+        import subprocess
+        script = (
+            'POSIX path of (choose file of type {"public.html", "html", "htm"} '
+            'with prompt "Select saved 1001tracklists HTML")'
+        )
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+        return result.stdout.strip() if result.returncode == 0 else None
+    else:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        path = filedialog.askopenfilename(
+            title="Select saved 1001tracklists HTML",
+            filetypes=[("HTML files", "*.htm *.html"), ("All files", "*.*")],
+        )
+        root.destroy()
+        return path or None
 
 
 def parse_1001tl_html(path: Path) -> list[dict]:
@@ -767,6 +808,7 @@ class TracklistPane(Vertical):
             if i < len(self._tracks)
         ]
         if jobs:
+            self.app.action_switch_tab("queue")  # type: ignore[attr-defined]
             self.app.enqueue(jobs)  # type: ignore[attr-defined]
 
 
@@ -928,6 +970,16 @@ class MixologyApp(App):
                 yield TracklistPane()
         yield Footer()
 
+    def on_mount(self) -> None:
+        if not FFMPEG_AVAILABLE:
+            self.notify(
+                "ffmpeg not found — downloads will work but track metadata will not be rewritten.\n"
+                "Install ffmpeg: brew install ffmpeg",
+                title="ffmpeg missing",
+                severity="warning",
+                timeout=12,
+            )
+
     def action_switch_tab(self, tab_id: str) -> None:
         self.query_one(TabbedContent).active = tab_id
 
@@ -963,20 +1015,27 @@ class MixologyApp(App):
             dest = out_dir / job.subfolder if job.subfolder else out_dir
             dest.mkdir(parents=True, exist_ok=True)
 
+            logger.info("Job %s | start | %r", job.id, job.display)
+
             # ── Step 1: resolve SoundCloud URL via search if needed ──────────
             if not SOUNDCLOUD_RE.match(job.query):
                 job.status = "searching"
                 self.call_from_thread(self._ui_update, job)
+                logger.info("Job %s | searching | query=%r", job.id, job.query)
+                job.original_query = job.query  # preserve for DRM fallback
                 try:
                     url = sc_resolve_url(job.query, cfg)
                 except Exception:
+                    logger.exception("Job %s | search exception", job.id)
                     url = None
                 if not url:
                     job.status = "failed"
                     job.error = "Not found on SoundCloud"
+                    logger.warning("Job %s | not found | %r", job.id, job.query)
                     self.call_from_thread(self._ui_update, job)
                     continue
                 job.query = url  # store resolved URL so we skip search next time
+                logger.info("Job %s | resolved | %s", job.id, url)
 
             # ── Step 2: download ─────────────────────────────────────────────
             job.status = "downloading"
@@ -990,10 +1049,55 @@ class MixologyApp(App):
                 sc_download(job.query, cfg, dest, _prog, job.filename_prefix)
                 job.status = "done"
                 job.progress = ""
+                logger.info("Job %s | done", job.id)
             except Exception as exc:
-                job.status = "failed"
-                job.error = str(exc)[:40]
-                job.progress = ""
+                exc_clean = ANSI_RE.sub("", str(exc))
+                is_drm = "DRM protected" in exc_clean
+                logger.exception("Job %s | download failed | %r", job.id, job.display)
+
+                # DRM fallback: the first search hit was an official Go+ upload.
+                # Search with n=5 and try each candidate until one downloads.
+                if is_drm and job.original_query:
+                    logger.info("Job %s | DRM hit — trying fallback search", job.id)
+                    job.status = "searching"
+                    job.progress = "DRM — trying re-upload…"
+                    self.call_from_thread(self._ui_update, job)
+                    try:
+                        candidates = sc_search(job.original_query, cfg, n=5)
+                        candidate_urls = [
+                            c.get("webpage_url") or c.get("url")
+                            for c in candidates
+                            if c.get("webpage_url") or c.get("url")
+                        ]
+                    except Exception:
+                        candidate_urls = []
+
+                    downloaded = False
+                    for candidate_url in candidate_urls:
+                        if candidate_url == job.query:
+                            continue  # already tried this one
+                        logger.info("Job %s | fallback try | %s", job.id, candidate_url)
+                        job.status = "downloading"
+                        job.progress = "re-upload…"
+                        self.call_from_thread(self._ui_update, job)
+                        try:
+                            sc_download(candidate_url, cfg, dest, _prog, job.filename_prefix)
+                            job.status = "done"
+                            job.progress = ""
+                            logger.info("Job %s | done (fallback)", job.id)
+                            downloaded = True
+                            break
+                        except Exception as fb_exc:
+                            logger.warning("Job %s | fallback failed | %s", job.id, ANSI_RE.sub("", str(fb_exc)))
+
+                    if not downloaded:
+                        job.status = "failed"
+                        job.error = "DRM protected"
+                        job.progress = ""
+                else:
+                    job.status = "failed"
+                    job.error = exc_clean.split("ERROR:")[-1].strip()[:35]
+                    job.progress = ""
             self.call_from_thread(self._ui_update, job)
 
     def _ui_update(self, job: Job) -> None:
@@ -1003,4 +1107,6 @@ class MixologyApp(App):
 
 
 if __name__ == "__main__":
+    if "--debug" in sys.argv:
+        setup_logging()
     MixologyApp().run()
