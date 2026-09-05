@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Downloaded audio files
+*.mp3
+*.m4a
+*.wav
+*.flac
+*.aac
+*.ogg
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
